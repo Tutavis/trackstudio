@@ -30,8 +30,6 @@ build/
 .DS_Store
 
 # Project specific
-static/
-!static/.gitkeep
 *.pth
 *.onnx
 *.pt
