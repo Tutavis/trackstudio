@@ -40,18 +40,19 @@ A real-time multi-camera object detection and tracking system with WebRTC stream
 ## Requirements
 
 - Python 3.10+
+- Docker (for MediaMTX server)
+- Any virtual environment manager (e.g. venv, conda, pipenv, etc., we recommend uv)
 - CUDA-capable GPU (recommended)
 - FFmpeg with hardware acceleration support
 - RTSP streams or cameras
 
 ## Installation
-
+For quick start, install from github:
 ```bash
-# Install from github
 pip install git+https://github.com/playbox-dev/trackstudio.git
 ```
 
-For development:
+For development / testing, clone this repository and install in development mode (recommended if you want to try out without camera setup):
 ```bash
 git clone https://github.com/playbox-dev/trackstudio
 cd trackstudio
@@ -105,18 +106,18 @@ trackstudio run -c test_config.json --vision-fps 10
 
 ## Testing with Local Videos
 
-For testing without real cameras, use ffmpeg to publish RTSP test streams:
-Assumes 2 videos are inside the `tests/videos` directory with names `cam1.mp4` and `cam2.mp4`. You can change the video files in the `stream_camera0_ffmpeg.sh` and `stream_camera1_ffmpeg.sh` scripts.
+For testing without real cameras, clone this repository and use ffmpeg to publish RTSP test streams:
+Assumes 2 videos are inside the `tests/videos` directory with names `cam1.mp4` and `cam2.mp4` (note: the file names start from 1 where as the camera names start from 0 in the config file). You can change the video files in the `stream_camera0_ffmpeg.sh` and `stream_camera1_ffmpeg.sh` scripts.
 We tested with videos from [Large Scale Multi-Camera Tracking Dataset](https://www.kaggle.com/datasets/aryashah2k/large-scale-multicamera-detection-dataset) [1].
 
 ```bash
-# 1. Start MediaMTX server
+# 1. Start MediaMTX server (in the root directory)
 docker compose up -d mediamtx
 
-# 2. Create test streams
+# 2. Create test streams (this reads the video files from the `tests/videos` directory and publishes them as RTSP streams).
 ./test_mediamtx.sh
 
-# 3. Run TrackStudio with test config
+# 3. Run TrackStudio with test config (test_config.json is configured with default settings)
 trackstudio run -c test_config.json
 
 # 4. Open http://localhost:8000 in your browser
@@ -158,7 +159,7 @@ app = ts.launch(
 trackstudio run
 
 # Start with custom streams
-trackstudio run --streams rtsp://localhost:8554/camera0 rtsp://localhost:8554/camera1
+trackstudio run --streams rtsp://localhost:8554/camera0 --streams rtsp://localhost:8554/camera1
 
 # Generate config file
 trackstudio config --output my_config.json
