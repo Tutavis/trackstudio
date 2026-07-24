@@ -206,7 +206,12 @@ export class WebRTCManager {
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
+          { urls: 'stun:stun1.l.google.com:19302' },
+          {
+            urls: 'turn:localhost:3478?transport=tcp',
+            username: 'tsuser',
+            credential: 'tspass123'
+          }
         ]
       })
 

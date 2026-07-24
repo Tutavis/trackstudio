@@ -9,8 +9,8 @@ Example:
     # Launch with default settings
     app = ts.launch(
         rtsp_streams=[
-            "rtsp://localhost:8554/camera0",
-            "rtsp://localhost:8554/camera1"
+            "rtsp://localhost:9554/camera0",
+            "rtsp://localhost:9554/camera1"
         ],
         tracker="rfdetr",  # or "dummy" for testing
         share=True  # Create public URL
@@ -96,7 +96,7 @@ def launch(
     """
     # Set up default streams if none provided
     if rtsp_streams is None:
-        rtsp_streams = ["rtsp://localhost:8554/camera0", "rtsp://localhost:8554/camera1"]
+        rtsp_streams = ["rtsp://localhost:9554/camera0", "rtsp://localhost:9554/camera1"]
 
     # Generate camera names if not provided
     if camera_names is None:
@@ -194,12 +194,12 @@ def demo():
     """Launch TrackStudio with demo configuration."""
     print("🎬 Launching TrackStudio demo...")
     print("Make sure you have RTSP streams running on:")
-    print("  - rtsp://localhost:8554/camera0")
-    print("  - rtsp://localhost:8554/camera1")
+    print("  - rtsp://localhost:9554/camera0")
+    print("  - rtsp://localhost:9554/camera1")
     print()
 
     return launch(
-        rtsp_streams=["rtsp://localhost:8554/camera0", "rtsp://localhost:8554/camera1"],
+        rtsp_streams=["rtsp://localhost:9554/camera0", "rtsp://localhost:9554/camera1"],
         camera_names=["Front Camera", "Side Camera"],
         tracker="dummy",  # Use dummy tracker for demo
         open_browser=True,

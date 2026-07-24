@@ -272,12 +272,14 @@ class BEVClusterMerger(VisionMerger):
                     if key in self.track_id_mapping:
                         existing_global_ids.add(self.track_id_mapping[key])
 
-                if existing_global_ids:
+                valid_existing_global_ids = {gid for gid in existing_global_ids if gid in self.global_tracks}
+                if valid_existing_global_ids:
                     # Merge with existing tracks
-                    primary_id = self._merge_global_tracks(existing_global_ids, timestamp)
+                    primary_id = self._merge_global_tracks(valid_existing_global_ids, timestamp)
                     self.multi_camera_associations += 1
                 else:
-                    # Create new global track
+                    # No still-live global track to merge into (mappings may be stale
+                    # if they pointed at a global track that has since expired) - start fresh
                     primary_id = self._create_new_global_track_for_cluster(cluster, timestamp)
 
                 # Update all candidates with the same global ID
@@ -340,6 +342,15 @@ class BEVClusterMerger(VisionMerger):
         for gid in global_ids:
             if gid != primary_id and gid in self.global_tracks:
                 other_track = self.global_tracks[gid]
+
+                # If both tracks already map the same camera to a different local
+                # track id, the old (camera_id, local_id) mapping is about to become
+                # orphaned - drop it now instead of leaving a stale entry that could
+                # later resolve to a global id that no longer exists.
+                for cam_id, other_local_id in other_track.camera_tracks.items():
+                    old_local_id = primary_track.camera_tracks.get(cam_id)
+                    if old_local_id is not None and old_local_id != other_local_id:
+                        self.track_id_mapping.pop((cam_id, old_local_id), None)
                 primary_track.camera_tracks.update(other_track.camera_tracks)
                 primary_track.positions.extend(other_track.positions)
 

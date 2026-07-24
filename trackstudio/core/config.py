@@ -31,6 +31,13 @@ class ServerConfig:
     # WebRTC Settings
     STUN_SERVERS = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"]
 
+    # Optional TURN relay. Needed when the browser can't reach this server's UDP ICE
+    # candidates directly (e.g. server is a remote/headless box accessed through
+    # SSH or VS Code Remote port forwarding, which only tunnels TCP). Unset by default.
+    TURN_URL = os.getenv("TURN_URL")  # e.g. "turn:localhost:3478?transport=tcp"
+    TURN_USERNAME = os.getenv("TURN_USERNAME")
+    TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL")
+
     # WebRTC Connection Timeouts (prevent ICE transaction issues)
     WEBRTC_TIMEOUTS = {
         "answer_timeout": 20.0,  # Increased from 15s for multi-stream

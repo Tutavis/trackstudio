@@ -26,8 +26,16 @@ class StreamConnection:
         self.connection_id = connection_id
         self.is_closed = False
 
-        # Create RTCPeerConnection with STUN servers
+        # Create RTCPeerConnection with STUN (and optional TURN) servers
         ice_servers = [RTCIceServer(url) for url in ServerConfig.STUN_SERVERS]
+        if ServerConfig.TURN_URL:
+            ice_servers.append(
+                RTCIceServer(
+                    urls=ServerConfig.TURN_URL,
+                    username=ServerConfig.TURN_USERNAME,
+                    credential=ServerConfig.TURN_CREDENTIAL,
+                )
+            )
         config = RTCConfiguration(iceServers=ice_servers)
         self.pc = RTCPeerConnection(configuration=config)
 

@@ -12,8 +12,8 @@ echo "   Publishing to: rtmp://${SERVER_IP}:1935/camera0"
 echo "   Resolution: 720x480 @ 15fps"
 echo ""
 echo "   Stream will be available at:"
-echo "   📹 RTSP: rtsp://${SERVER_IP}:8554/camera0"
-echo "   🌐 RTMP: rtmp://${SERVER_IP}:1935/camera0"
+echo "   📹 RTSP: rtsp://${SERVER_IP}:9554/camera0"
+echo "   🌐 RTMP: rtmp://${SERVER_IP}:2935/camera0"
 echo "   🎥 HLS:  http://${SERVER_IP}:8888/camera0"
 echo ""
 echo "   Press Ctrl+C to stop"
@@ -25,7 +25,7 @@ if [ ! -f "$VIDEO_FILE" ]; then
 
     # Generate test pattern with overlay
     while true; do
-        ffmpeg -f lavfi -i testsrc2=size=720x480:rate=15 \
+        ffmpeg -re -f lavfi -i testsrc2=size=720x480:rate=15 \
             -vf "drawtext=text='Camera 0 - Test Pattern':x=10:y=10:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5,
                  drawtext=text='%{localtime}':x=10:y=40:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5" \
             -c:v libx264 \
@@ -34,7 +34,7 @@ if [ ! -f "$VIDEO_FILE" ]; then
             -g 30 \
             -b:v 2048k \
             -f flv \
-            rtmp://${SERVER_IP}:1935/camera0
+            rtmp://${SERVER_IP}:2935/camera0
 
         echo "Stream disconnected, restarting in 2 seconds..."
         sleep 2
@@ -52,7 +52,7 @@ else
             -g 30 \
             -b:v 2048k \
             -f flv \
-            rtmp://${SERVER_IP}:1935/camera0
+            rtmp://${SERVER_IP}:2935/camera0
 
         echo "Stream disconnected, restarting in 2 seconds..."
         sleep 2

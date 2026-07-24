@@ -191,6 +191,9 @@ class StreamCombinerTrack(VideoStreamTrack):
 
                 # Explicitly use FFmpeg backend to avoid GStreamer warnings
                 self.stream_caps[stream_id] = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+                logger.info(
+                    f"Stream {stream_id} opened = {self.stream_caps[stream_id].isOpened()}"
+                )
 
                 # Set timeout and buffer properties before checking if opened
                 self.stream_caps[stream_id].set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 60000)  # 60 second timeout
@@ -223,6 +226,7 @@ class StreamCombinerTrack(VideoStreamTrack):
 
     async def recv(self):
         """Receive frames from individual streams, apply delays via frame skipping, and combine manually"""
+        logger.info("recv() called")
         current_time = time.time()
 
         # Calculate relative timestamp for both video and vision (always needed)
@@ -260,7 +264,7 @@ class StreamCombinerTrack(VideoStreamTrack):
             pts = int(relative_timestamp * 90000)
             av_frame.pts = pts
             av_frame.time_base = Fraction(1, 90000)
-
+            logger.info(f"Returning frame pts={av_frame.pts}")
             return av_frame
 
         try:
@@ -464,6 +468,12 @@ class StreamCombinerTrack(VideoStreamTrack):
             av_frame.pts = pts
             av_frame.time_base = Fraction(1, 90000)
 
+            logger.info(
+                f"Returning frame pts={pts} "
+                f"streams={len(self.stream_caps)} "
+                f"opened={sum(cap.isOpened() for cap in self.stream_caps.values())}"
+            )
+
             return av_frame
 
         except Exception as e:
@@ -481,6 +491,7 @@ class StreamCombinerTrack(VideoStreamTrack):
 
     async def _initialize_capture(self):
         """Initialize the stream captures"""
+        logger.info("Initializing capture...")
         if self.stream_caps:
             return  # Already initialized
 
