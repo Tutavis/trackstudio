@@ -6,18 +6,34 @@ enabling deep learning-based person re-identification features.
 """
 
 import logging
+import os
 
 import numpy as np
 import torch
 
 logger = logging.getLogger(__name__)
 
+# Person-ReID task-finetuned checkpoints (Market-1501), as opposed to the
+# ImageNet-classification-only backbones torchreid's FeatureExtractor downloads
+# by default when no model_path is given. Same URLs torchreid's own
+# reid_model_factory.py lists under __trained_urls.
+MARKET1501_CHECKPOINT_URLS = {
+    "osnet_x1_0": "https://drive.google.com/uc?id=1vduhq5DpN2q1g4fYEZfPI17MJeh9qyrA",
+    "osnet_x0_75": "https://drive.google.com/uc?id=1ozRaDSQw_EQ8_93OUmjDbvLXw9TnfPer",
+    "osnet_x0_5": "https://drive.google.com/uc?id=1PLB9rgqrUM7blWrg4QlprCuPT7ILYGKT",
+    "osnet_x0_25": "https://drive.google.com/uc?id=1z1UghYvOTtjx7kEoRfmqSMu-z62J6MAj",
+}
+
 
 class TorchReIDExtractor:
     """Wrapper for TorchReID feature extraction"""
 
     def __init__(
-        self, model_name: str = "osnet_x0_25", device: str | None = None, image_size: tuple[int, int] = (256, 128)
+        self,
+        model_name: str = "osnet_x0_25",
+        device: str | None = None,
+        image_size: tuple[int, int] = (256, 128),
+        model_path: str | None = None,
     ):
         """
         Initialize TorchReID feature extractor
@@ -26,6 +42,10 @@ class TorchReIDExtractor:
             model_name: Name of the ReID model (e.g., 'osnet_x0_25', 'osnet_x1_0')
             device: Device to run on ('cuda' or 'cpu'), auto-detect if None
             image_size: Input image size for the model (height, width)
+            model_path: Path to a person-ReID task-finetuned checkpoint. If not
+                given, a Market-1501-trained checkpoint is downloaded/cached
+                automatically when one is known for model_name; otherwise falls
+                back to torchreid's default ImageNet-only backbone.
         """
         self.model_name = model_name
         self.image_size = image_size
@@ -35,12 +55,40 @@ class TorchReIDExtractor:
         else:
             self.device = device
 
+        self.model_path = model_path or self._resolve_market1501_checkpoint(model_name)
+
         self.extractor = None
         self._initialize_extractor()
 
         # Verify extractor was properly initialized
         if self.extractor is None:
             raise RuntimeError("TorchReID extractor failed to initialize properly")
+
+    def _resolve_market1501_checkpoint(self, model_name: str) -> str | None:
+        """Download (if needed) and return the path to a Market-1501-trained checkpoint."""
+        url = MARKET1501_CHECKPOINT_URLS.get(model_name)
+        if url is None:
+            logger.warning(
+                f"⚠️ No Market-1501 checkpoint known for '{model_name}' - "
+                "falling back to torchreid's ImageNet-only backbone"
+            )
+            return None
+
+        cache_dir = os.path.expanduser("~/.cache/torch/checkpoints")
+        os.makedirs(cache_dir, exist_ok=True)
+        cached_file = os.path.join(cache_dir, f"{model_name}_market1501.pt")
+
+        if not os.path.exists(cached_file):
+            try:
+                import gdown  # noqa: PLC0415
+
+                logger.info(f"⬇️ Downloading Market-1501 ReID checkpoint for {model_name}...")
+                gdown.download(url, cached_file, quiet=False)
+            except Exception as e:
+                logger.error(f"❌ Failed to download Market-1501 checkpoint for {model_name}: {e}")
+                return None
+
+        return cached_file
 
     def _initialize_extractor(self):
         """Initialize the TorchReID feature extractor"""
@@ -63,10 +111,12 @@ class TorchReIDExtractor:
 
             self.extractor = FeatureExtractor(
                 model_name=self.model_name,
+                model_path=self.model_path or "",
                 device=self.device,
                 image_size=self.image_size,
             )
-            logger.info(f"✅ TorchReID extractor initialized: {self.model_name} on {self.device}")
+            checkpoint_desc = self.model_path if self.model_path else "ImageNet-only backbone (no ReID checkpoint)"
+            logger.info(f"✅ TorchReID extractor initialized: {self.model_name} on {self.device} ({checkpoint_desc})")
 
         except ImportError as e:
             logger.error(f"❌ Failed to import torchreid: {e}")

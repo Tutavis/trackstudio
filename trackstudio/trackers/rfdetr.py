@@ -234,6 +234,16 @@ class RFDETRTracker(VisionTracker):
 
         tracked_detections = tracker.update(sv_detections, frame)
 
+        # DeepSORT already computed and stored an appearance feature (running mean
+        # over its update history) for each of its internal trackers during the
+        # update() call above - reuse it instead of re-running ReID extraction
+        # later on the same crops (see get_reid_features()).
+        feature_by_raw_id = {
+            raw_tracker.tracker_id: raw_tracker.get_feature()
+            for raw_tracker in tracker.trackers
+            if raw_tracker.tracker_id >= 0
+        }
+
         tracks = []
         if hasattr(tracked_detections, "tracker_id") and tracked_detections.tracker_id is not None:
             for i, tracker_id in enumerate(tracked_detections.tracker_id):
@@ -246,6 +256,7 @@ class RFDETRTracker(VisionTracker):
                             confidence=tracked_detections.confidence[i],
                             age=1,
                             camera_id=camera_id,
+                            feature=feature_by_raw_id.get(tracker_id),
                         )
                     )
         return tracks
@@ -346,10 +357,9 @@ class RFDETRTracker(VisionTracker):
 
     def get_reid_features(self, frame: np.ndarray, tracks: list[Track]) -> np.ndarray | None:
         """
-        Extract ReID features for tracks.
-
-        Uses the TorchReID extractor to compute appearance features for
-        the provided tracks, which can be used for cross-camera matching.
+        Get ReID features for tracks, reusing what DeepSORT's own association
+        step already computed wherever possible instead of re-running the ReID
+        model on the same crops a second time.
 
         Args:
             frame: Input frame containing the tracked objects
@@ -362,24 +372,32 @@ class RFDETRTracker(VisionTracker):
             return None
 
         try:
-            # Extract bounding boxes from tracks
-            bboxes = []
-            for track in tracks:
-                x, y, w, h = track.bbox
-                # Convert to x1, y1, x2, y2 format expected by ReID extractor
-                bboxes.append([x, y, x + w, y + h])
+            cached_features: list[np.ndarray | None] = [track.feature for track in tracks]
+            missing_indices = [i for i, feature in enumerate(cached_features) if feature is None]
 
-            bboxes_array = np.array(bboxes, dtype=np.float32)
+            if missing_indices:
+                missing_bboxes = []
+                for i in missing_indices:
+                    x, y, w, h = tracks[i].bbox
+                    missing_bboxes.append([x, y, x + w, y + h])
+                missing_bboxes_array = np.array(missing_bboxes, dtype=np.float32)
 
-            # Extract features using ReID model
-            features = self.reid_extractor.extract_features(frame, bboxes_array)
+                fresh_features = self.reid_extractor.extract_features(frame, missing_bboxes_array)
+                if fresh_features is None or len(fresh_features) != len(missing_indices):
+                    logger.warning(f"⚠️ ReID feature extraction returned None for {len(tracks)} tracks")
+                    return None
 
-            if features is not None:
-                logger.debug(f"🔍 Extracted ReID features for {len(tracks)} tracks: shape {features.shape}")
-            else:
-                logger.warning(f"⚠️ ReID feature extraction returned None for {len(tracks)} tracks")
+                for i, feature in zip(missing_indices, fresh_features, strict=False):
+                    cached_features[i] = feature
 
-            return features
+            reused_count = len(tracks) - len(missing_indices)
+            if reused_count:
+                logger.debug(
+                    f"♻️ Reused {reused_count}/{len(tracks)} ReID features from tracking step "
+                    f"(re-extracted {len(missing_indices)})"
+                )
+
+            return np.array(cached_features)
 
         except Exception as e:
             logger.error(f"❌ Error extracting ReID features: {e}")

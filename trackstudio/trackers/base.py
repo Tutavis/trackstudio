@@ -50,6 +50,9 @@ class Track:
         confidence: Current confidence score between 0 and 1
         age: Number of frames this track has been active
         camera_id: ID of the camera that produced this track
+        feature: Optional appearance (ReID) feature vector already computed for
+            this track, e.g. by the underlying tracker's own association step.
+            Lets downstream ReID consumers reuse it instead of re-extracting.
     """
 
     track_id: str
@@ -57,6 +60,7 @@ class Track:
     confidence: float
     age: int
     camera_id: int
+    feature: np.ndarray | None = None
 
 
 @dataclass

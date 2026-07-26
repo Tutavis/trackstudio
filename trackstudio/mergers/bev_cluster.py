@@ -104,6 +104,7 @@ class BEVClusterMerger(VisionMerger):
         self.track_id_mapping: dict[tuple[int, str], str] = {}
         self.total_tracks_created = 0
         self.multi_camera_associations = 0
+        self.reidentifications_after_gap = 0
 
     def merge(
         self,
@@ -146,7 +147,8 @@ class BEVClusterMerger(VisionMerger):
             track_candidates.append(candidate)
 
         clusters = self._cluster_tracks(track_candidates)
-        return self._assign_global_ids_to_clusters(clusters, timestamp)
+        live_keys_this_frame = {(c.camera_id, c.local_track_id) for c in track_candidates}
+        return self._assign_global_ids_to_clusters(clusters, timestamp, live_keys_this_frame)
 
     def _cluster_tracks(self, candidates: list[TrackCandidate]) -> list[list[TrackCandidate]]:
         """
@@ -226,7 +228,12 @@ class BEVClusterMerger(VisionMerger):
             if adj[u, v] and not visited[v]:
                 self._dfs(v, adj, visited, cluster, candidates)
 
-    def _assign_global_ids_to_clusters(self, clusters: list[list[TrackCandidate]], timestamp: float) -> list[BEVTrack]:
+    def _assign_global_ids_to_clusters(
+        self,
+        clusters: list[list[TrackCandidate]],
+        timestamp: float,
+        live_keys_this_frame: set[tuple[int, str]],
+    ) -> list[BEVTrack]:
         """
         Assign global IDs to clustered tracks.
 
@@ -236,6 +243,9 @@ class BEVClusterMerger(VisionMerger):
         Args:
             clusters: List of track clusters
             timestamp: Current timestamp
+            live_keys_this_frame: (camera_id, local_track_id) pairs present in
+                this frame, used to tell a genuinely-still-visible object apart
+                from a stale historical mapping when re-identifying
 
         Returns:
             List of BEV tracks with global IDs assigned
@@ -248,15 +258,26 @@ class BEVClusterMerger(VisionMerger):
                 candidate = cluster[0]
                 key = (candidate.camera_id, candidate.local_track_id)
 
-                if key in self.track_id_mapping:
-                    global_id = self.track_id_mapping[key]
-                    if global_id in self.global_tracks:
-                        self.global_tracks[global_id].last_seen = timestamp
-                        self.global_tracks[global_id].positions.append(
-                            (candidate.position[0], candidate.position[1], timestamp)
-                        )
+                global_id = self.track_id_mapping.get(key)
+                if global_id is not None and global_id in self.global_tracks:
+                    self.global_tracks[global_id].last_seen = timestamp
+                    self.global_tracks[global_id].positions.append(
+                        (candidate.position[0], candidate.position[1], timestamp)
+                    )
                 else:
-                    global_id = self._create_new_global_track_for_cluster(cluster, timestamp)
+                    # No live mapping (either genuinely new, or stale/pointing at an
+                    # expired global track) - try to re-identify against a
+                    # currently-live global track by appearance before spawning a
+                    # new identity. Lets someone who briefly leaves a camera's view
+                    # (occlusion causing DeepSORT to reassign a new local track id)
+                    # keep their global id instead of always starting over.
+                    reidentified_id = self._try_reidentify_single_camera_candidate(candidate, live_keys_this_frame)
+                    if reidentified_id is not None:
+                        global_id = reidentified_id
+                        self._attach_candidate_to_global_track(global_id, candidate, timestamp)
+                        self.reidentifications_after_gap += 1
+                    else:
+                        global_id = self._create_new_global_track_for_cluster(cluster, timestamp)
                     self.track_id_mapping[key] = global_id
 
                 # Create updated BEV track
@@ -324,6 +345,85 @@ class BEVClusterMerger(VisionMerger):
         )
         self.total_tracks_created += 1
         return global_id
+
+    def _try_reidentify_single_camera_candidate(
+        self, candidate: TrackCandidate, live_keys_this_frame: set[tuple[int, str]]
+    ) -> str | None:
+        """
+        Try to re-identify a track with no current global mapping against
+        existing global tracks purely by appearance similarity.
+
+        This is what lets someone who briefly leaves a camera's view (e.g. an
+        occlusion that causes DeepSORT to reassign a new local track id) keep
+        their global identity instead of always spawning a brand new one - the
+        (camera_id, local_track_id) key alone can't catch that case since it
+        changed.
+
+        Args:
+            candidate: The unmapped track candidate to try to re-identify
+            live_keys_this_frame: (camera_id, local_track_id) pairs actually
+                present in this frame
+
+        Returns:
+            The best-matching global id if one is within the appearance
+            threshold, otherwise None
+        """
+        if candidate.appearance_features is None:
+            return None
+
+        best_global_id: str | None = None
+        best_distance = self.config.appearance_threshold
+
+        for global_id, track in self.global_tracks.items():
+            if track.appearance_features is None:
+                continue
+
+            # Skip global tracks whose recorded local track for this camera is
+            # STILL being produced this frame - that means a distinct object is
+            # genuinely occupying that camera slot right now, not a gap
+            # re-acquisition. (track_id_mapping alone can't tell us this: it
+            # keeps stale entries around until the whole global track expires,
+            # long after DeepSORT actually stopped emitting that local id.)
+            existing_local_id = track.camera_tracks.get(candidate.camera_id)
+            if existing_local_id is not None and (candidate.camera_id, existing_local_id) in live_keys_this_frame:
+                continue
+
+            cosine_sim = np.dot(candidate.appearance_features, track.appearance_features) / (
+                np.linalg.norm(candidate.appearance_features) * np.linalg.norm(track.appearance_features) + 1e-8
+            )
+            distance = 1.0 - cosine_sim
+            if distance < best_distance:
+                best_distance = distance
+                best_global_id = global_id
+
+        return best_global_id
+
+    def _attach_candidate_to_global_track(self, global_id: str, candidate: TrackCandidate, timestamp: float) -> None:
+        """
+        Attach a re-identified single-camera candidate to an existing global
+        track, cleaning up any stale reverse-mapping for the camera slot it's
+        taking over (same reasoning as in _merge_global_tracks).
+
+        Args:
+            global_id: The existing global track to attach the candidate to
+            candidate: The re-identified track candidate
+            timestamp: Current timestamp
+        """
+        track = self.global_tracks[global_id]
+
+        old_local_id = track.camera_tracks.get(candidate.camera_id)
+        if old_local_id is not None and old_local_id != candidate.local_track_id:
+            self.track_id_mapping.pop((candidate.camera_id, old_local_id), None)
+
+        track.camera_tracks[candidate.camera_id] = candidate.local_track_id
+        track.last_seen = timestamp
+        track.positions.append((candidate.position[0], candidate.position[1], timestamp))
+
+        if candidate.appearance_features is not None:
+            if track.appearance_features is None:
+                track.appearance_features = candidate.appearance_features
+            else:
+                track.appearance_features = (track.appearance_features + candidate.appearance_features) / 2.0
 
     def _merge_global_tracks(self, global_ids: set[str], timestamp: float) -> str:
         """
@@ -411,5 +511,6 @@ class BEVClusterMerger(VisionMerger):
             "total_global_tracks": len(self.global_tracks),
             "total_tracks_created": self.total_tracks_created,
             "multi_camera_associations": self.multi_camera_associations,
+            "reidentifications_after_gap": self.reidentifications_after_gap,
             "active_track_mappings": len(self.track_id_mapping),
         }
