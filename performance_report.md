@@ -58,7 +58,20 @@ Post-fix step breakdown (78 timing blocks ≈ 2,340 vision frames, via `scripts/
 | 6 — Cross-Cam Merge | 1.99 | 0.08 | 5.62 |
 | **Total** | **193.46** | 141.92 | 224.99 |
 
-Per-stream (post-fix): stream0 detect avg 46.0ms / track avg 52.1ms; stream1 detect avg 45.6ms / track avg 47.4ms.
+Step 3 splits into Detect (RF-DETR) and Track (DeepSORT) per camera — Track is
+consistently the more expensive half, not Detect:
+
+| | Stream 0 | Stream 1 | Combined |
+|---|---|---|---|
+| Detect (RF-DETR) | 46.04 ms | 45.59 ms | **91.63 ms** |
+| Track (DeepSORT) | 52.13 ms | 47.39 ms | **99.52 ms** |
+
+Combined Detect + Track (91.63 + 99.52 = 191.15ms) accounts for essentially all of
+Step 3's 191.16ms average. Track costs more because it isn't just Kalman-filter
+math — `DeepSORTTracker.update()` also runs the OSNet ReID feature extraction
+internally (to compute the appearance cost it blends with IoU for matching), so
+both halves of Step 3 are really "one neural network forward pass each" (RF-DETR,
+then OSNet), not a cheap classical-CV step next to an expensive one.
 
 Step 5 collapsing from ~63–93ms (baseline) to ~0.04ms (post-fix) is the ReID dedup fix working as intended — it now reuses the appearance feature DeepSORT's own association step already computed instead of running OSNet a second time. Step 3 absorbs that cost instead (it's where DeepSORT's feature extraction actually happens), so total latency dropped by roughly the old Step 5 cost, consistent with the ~87ms overall improvement (271ms → 184ms).
 
